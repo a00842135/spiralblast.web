@@ -625,7 +625,7 @@ let sesionVista = null;                // sesión que se muestra en la pestaña 
 let historial = [];
 let mostrandoResultado = false;
 let permisoUI = false, nuevaPendiente = false, requiereNuevaSesion = false;
-function juegoVisible(){ return !!(!tutorialActivo && !practicaActiva && ses && !ses.terminada && ses.reps.length < cfg.meta && !paroWebUI && !requiereNuevaSesion && $('#vistaJuego').classList.contains('on') && $('#juego').classList.contains('on') && !document.hidden && !$('#modal').classList.contains('on')); }
+function juegoVisible(){ return !!(!tutorialActivo && ses && !ses.terminada && ses.reps.length < cfg.meta && !paroWebUI && !requiereNuevaSesion && $('#vistaJuego').classList.contains('on') && $('#juego').classList.contains('on') && !document.hidden && !$('#modal').classList.contains('on')); }
 function sincronizarJuego(){
   const activo = juegoVisible() && (modo === 'demo' || enlaceParo());
   if(activo && !permisoUI){ permisoUI = true; enviar(nuevaPendiente ? 'N,'+cfg.meta : 'G'); nuevaPendiente = false; }
@@ -981,7 +981,6 @@ function fuerza(pct, est){
   if(est === 6) confirmarParoWeb();
   if(est === 6 && disp.estado !== 6) toast('⛔ Paro de emergencia activado', 4000);
   disp.pct = pct; disp.estado = est;
-  if(practicaActiva) muestraPractica(pct,est);
   historial.push(pct); if(historial.length > 250) historial.shift();
   if(ses && !ses.terminada){
     if(est === 4){ if(!curva) curva = {t0: Date.now(), pts: []}; curva.pts.push(pct); }
@@ -1437,7 +1436,7 @@ function actualizarParoWeb(){
   $('#textoParoWeb').textContent = !conectado ? 'Sin conexión: estado físico no verificable' : paroConfirmado ? 'PARO confirmado por Arduino' : 'STOP solicitado: esperando confirmación del Arduino';
   $('#btnRearmeWeb').disabled = !conectado || !paroConfirmado;
 }
-function confirmarParoWeb(){ if(tutorialActivo || practicaActiva){ cerrarPreparacion(); pantalla('inicio'); } paroWebUI = true; sincronizarJuego(); paroConfirmado = true; paroPendiente = false; curva = null; if(ac) ac.suspend().catch(()=>{}); actualizarParoWeb(); }
+function confirmarParoWeb(){ if(tutorialActivo){ cerrarPreparacion(); pantalla('inicio'); } paroWebUI = true; sincronizarJuego(); paroConfirmado = true; paroPendiente = false; curva = null; if(ac) ac.suspend().catch(()=>{}); actualizarParoWeb(); }
 function liberarParoWeb(){ paroWebUI = false; paroConfirmado = false; paroPendiente = false; if(ac) ac.resume().catch(()=>{}); actualizarParoWeb(); sincronizarJuego(); }
 $('#btnParoWeb').onclick = () => {
   if(!enlaceParo()) return;
@@ -1480,7 +1479,7 @@ async function abrirGatt(){
   if(cfg.volumen !== undefined) enviar('W,' + cfg.volumen);      // el último volumen que se usó
 }
 function desconectado(){
-  if(tutorialActivo || practicaActiva){ cerrarPreparacion(); pantalla('inicio'); }
+  if(tutorialActivo){ cerrarPreparacion(); pantalla('inicio'); }
   permisoUI=false; requiereNuevaSesion=true; nuevaPendiente=false;
   if(ses && !ses.terminada) terminar();
   if(paroWebUI){ paroConfirmado = false; actualizarParoWeb(); }
@@ -1649,8 +1648,8 @@ function confirmarSesion(alConfirmar){
 }
 $('#confSi').onclick = () => { $('#modalConfirma').classList.remove('on'); const f = accionConfirma; accionConfirma = null; if(f) f(); };
 $('#confRegresar').onclick = () => { $('#modalConfirma').classList.remove('on'); accionConfirma = null; pantalla('inicio'); };   // para cambiar de paciente
-$('#btnJugar').onclick = abrirPractica;                 // el paciente ya se confirmó antes de calibrar
-$('#btnSaltarCal').onclick = abrirPractica;
+$('#btnJugar').onclick = iniciarJuegoCalibrado;                 // el paciente ya se confirmó antes de calibrar
+$('#btnSaltarCal').onclick = iniciarJuegoCalibrado;
 $('#btnOtraVez').onclick = () => confirmarSesion(nuevaSesion);   // otra sesión: se vuelve a confirmar el nombre
 $('#btnTerminar').onclick = terminar;
 $('#btnVerAnalisis').onclick = () => irTab('Sesion');
@@ -1738,25 +1737,23 @@ cargarPacientes().then(() => {
   requestAnimationFrame(frame);
 })();
 
-let tutorialActivo=false, practicaActiva=false, pasoTutorial=0, fasePractica=0, inicioApretar=0, ultimoEMG=0;
+let tutorialActivo=false, pasoTutorial=0;
 const textosTutorial=['¡Tu mano tiene superpoderes!','Apoya el brazo con la palma hacia arriba.','Sostén la pelota suavemente.','Aprieta y después relaja la mano.','Relaja tu mano para lanzar la canica.','Espera a que la siguiente canica esté lista.','Cada lanzamiento tiene una recompensa.','Mueve tus dedos, no tu muñeca.'];
 const panelPrep=document.createElement('section'); panelPrep.id='prepTutorial'; panelPrep.hidden=true;
-panelPrep.innerHTML=`<div class="prepCaja"><div id="prepTutorialContenido"><h2 id="prepTitulo"></h2><progress id="prepProgreso" max="8" value="1"></progress><video id="prepVideo" playsinline muted preload="metadata"></video><p id="prepTexto"></p><p id="prepError" role="status"></p><div class="prepBotones"><button class="btn chico blanco" id="prepAnterior">Anterior</button><button class="btn chico blanco" id="prepRepetir">Repetir</button><button class="btn chico verde" id="prepSiguiente">Siguiente</button></div><div class="prepBotones"><label><input type="checkbox" id="prepAuto" checked> Avance automático</label><label><input type="checkbox" id="prepVoz"> Narración</label><button class="btn chico blanco" id="prepOmitir">Omitir tutorial</button></div></div><div id="prepPractica" hidden><h2>¡Vamos a practicar!</h2><p>Este lanzamiento es virtual. La canica física no se dispara.</p><h2 id="prepIndicacion">Relaja tu mano</h2><progress id="prepFuerza" max="150" value="0"></progress><div id="prepCanica" aria-hidden="true">⚪</div><button class="btn chico" id="prepDemo" hidden>Mantén presionado para apretar</button><div class="prepBotones"><button class="btn verde" id="prepJugar" disabled>Empezar juego</button><button class="btn blanco" id="prepSalir">Volver</button></div></div><button class="btn chico blanco" id="prepStop">⛔ STOP</button></div>`;
+panelPrep.innerHTML=`<div class="prepCaja"><div id="prepTutorialContenido"><h2 id="prepTitulo"></h2><progress id="prepProgreso" max="8" value="1"></progress><video id="prepVideo" playsinline muted preload="metadata"></video><p id="prepTexto"></p><p id="prepError" role="status"></p><div class="prepBotones"><button class="btn chico blanco" id="prepAnterior">Anterior</button><button class="btn chico blanco" id="prepRepetir">Repetir</button><button class="btn chico verde" id="prepSiguiente">Siguiente</button></div><div class="prepBotones"><label><input type="checkbox" id="prepAuto" checked> Avance automático</label><label><input type="checkbox" id="prepVoz"> Narración</label><button class="btn chico blanco" id="prepOmitir">Omitir tutorial</button></div></div><button class="btn chico blanco" id="prepStop">⛔ STOP</button></div>`;
 document.body.append(panelPrep);
-const cssPrep=document.createElement('style');cssPrep.textContent=`#prepTutorial[hidden],#prepTutorial [hidden]{display:none!important}#prepTutorial{position:fixed;inset:0;z-index:9999;background:#28204ccc;display:grid;place-items:center;padding:12px;overflow:auto} .prepCaja{background:#f7f3ff;color:#29264e;border-radius:24px;padding:16px;width:min(900px,100%);max-height:95vh;overflow:auto;text-align:center;box-shadow:0 12px 50px #211c5544}.prepCaja video{width:100%;max-height:58vh;background:#d8edff;border-radius:16px;display:block}.prepCaja progress{width:90%;accent-color:#7955d9}.prepBotones{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin:10px 0}#prepCanica{font-size:64px;transition:transform .7s ease,opacity .7s}#prepCanica.lanzada{transform:translateX(90px) scale(.3);opacity:.25}#prepError{color:#9a3150}`;document.head.append(cssPrep);
+const cssPrep=document.createElement('style');cssPrep.textContent=`#prepTutorial[hidden],#prepTutorial [hidden]{display:none!important}#prepTutorial{position:fixed;inset:0;z-index:9999;background:#28204ccc;display:grid;place-items:center;padding:12px;overflow:auto} .prepCaja{background:#f7f3ff;color:#29264e;border-radius:24px;padding:16px;width:min(900px,100%);max-height:95vh;overflow:auto;text-align:center;box-shadow:0 12px 50px #211c5544}.prepCaja video{width:100%;max-height:58vh;background:#d8edff;border-radius:16px;display:block}.prepCaja progress{width:90%;accent-color:#7955d9}.prepBotones{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin:10px 0}#prepError{color:#9a3150}`;document.head.append(cssPrep);
 function bloquearPreparacion(){permisoUI=false;nuevaPendiente=false;requiereNuevaSesion=true;curva=null;enviar('X');}
-function cerrarPreparacion(){tutorialActivo=false;practicaActiva=false;panelPrep.hidden=true;$('#prepVideo').pause();if(window.speechSynthesis) speechSynthesis.cancel();if(modo==='demo')sim.apretar(false);bloquearPreparacion();}
-function abrirTutorial(){if(paroWebUI || (modo!=='demo'&&!enlaceParo()))return;bloquearPreparacion();tutorialActivo=true;practicaActiva=false;panelPrep.hidden=false;$('#prepTutorialContenido').hidden=false;$('#prepPractica').hidden=true;pasoTutorial=0;mostrarPasoTutorial();}
+function cerrarPreparacion(){tutorialActivo=false;panelPrep.hidden=true;$('#prepVideo').pause();if(window.speechSynthesis) speechSynthesis.cancel();if(modo==='demo')sim.apretar(false);bloquearPreparacion();}
+function abrirTutorial(){if(paroWebUI || (modo!=='demo'&&!enlaceParo()))return;bloquearPreparacion();tutorialActivo=true;panelPrep.hidden=false;$('#prepTutorialContenido').hidden=false;pasoTutorial=0;mostrarPasoTutorial();}
 function narrarPaso(){if(!window.speechSynthesis)return;speechSynthesis.cancel();if($('#prepVoz').checked){const u=new SpeechSynthesisUtterance(textosTutorial[pasoTutorial]);u.lang='es-MX';speechSynthesis.speak(u);}}
 function mostrarPasoTutorial(){const v=$('#prepVideo');$('#prepTitulo').textContent='Paso '+(pasoTutorial+1)+' de 8';$('#prepProgreso').value=pasoTutorial+1;$('#prepTexto').textContent=textosTutorial[pasoTutorial];$('#prepError').textContent='';$('#prepAnterior').disabled=pasoTutorial===0;$('#prepSiguiente').textContent=pasoTutorial===7?'Ir a calibración':'Siguiente';v.src='assets/tutorial/'+String(pasoTutorial+1).padStart(2,'0')+'.mp4';v.play().catch(()=>{$('#prepError').textContent='Pulsa Repetir para reproducir el video.';});narrarPaso();}
 function finTutorial(){cerrarPreparacion();irACalibrar();}
 function siguienteTutorial(){if(!tutorialActivo)return;if(pasoTutorial===7)finTutorial();else{pasoTutorial++;mostrarPasoTutorial();}}
 $('#prepVideo').onended=()=>{if($('#prepAuto').checked)siguienteTutorial();};$('#prepVideo').onerror=()=>{$('#prepError').textContent='Video no disponible. Puedes continuar manualmente.';};$('#prepAnterior').onclick=()=>{if(pasoTutorial>0){pasoTutorial--;mostrarPasoTutorial();}};$('#prepSiguiente').onclick=siguienteTutorial;$('#prepRepetir').onclick=()=>{const v=$('#prepVideo');v.currentTime=0;v.play().catch(()=>{});narrarPaso();};$('#prepVoz').onchange=narrarPaso;$('#prepOmitir').onclick=finTutorial;
-function abrirPractica(){if(!disp.cal||paroWebUI||(modo!=='demo'&&!enlaceParo()))return;bloquearPreparacion();practicaActiva=true;tutorialActivo=false;fasePractica=0;ultimoEMG=0;panelPrep.hidden=false;$('#prepTutorialContenido').hidden=true;$('#prepPractica').hidden=false;$('#prepDemo').hidden=modo!=='demo';$('#prepJugar').disabled=true;$('#prepCanica').classList.remove('lanzada');$('#prepIndicacion').textContent='Relaja tu mano';}
-function muestraPractica(pct,est){if(paroWebUI||est!==3||!Number.isFinite(pct)){fasePractica=0;$('#prepJugar').disabled=true;return;}ultimoEMG=Date.now();$('#prepFuerza').value=pct;if(fasePractica===0&&pct<cfg.off){fasePractica=1;$('#prepIndicacion').textContent='¡Aprieta la pelota!';}else if(fasePractica===1&&pct>=cfg.on){fasePractica=2;inicioApretar=Date.now();$('#prepIndicacion').textContent='¡Ahora relaja tu mano!';}else if(fasePractica===2&&pct<cfg.off){if(Date.now()-inicioApretar<150){fasePractica=1;$('#prepIndicacion').textContent='Intenta otra vez';return;}fasePractica=3;$('#prepCanica').classList.add('lanzada');$('#prepIndicacion').textContent='¡Lo lograste!';}$('#prepJugar').disabled=!(fasePractica===3&&pct<cfg.off);}
-setInterval(()=>{if(practicaActiva&&Date.now()-ultimoEMG>500)$('#prepJugar').disabled=true;},200);
-$('#prepJugar').onclick=()=>{if(!practicaActiva||fasePractica!==3||Date.now()-ultimoEMG>500||disp.pct>=cfg.off||paroWebUI||(!enlaceParo()&&modo!=='demo'))return;cerrarPreparacion();nuevaSesion();};$('#prepSalir').onclick=()=>{cerrarPreparacion();pantalla('inicio');};$('#prepStop').onclick=()=>{if(modo==='demo'){cerrarPreparacion();pantalla('inicio');}else{$('#btnParoWeb').click();cerrarPreparacion();pantalla('inicio');}};
-$('#prepDemo').onpointerdown=e=>{e.preventDefault();e.target.setPointerCapture(e.pointerId);sim.apretar(true);};['pointerup','pointercancel','lostpointercapture'].forEach(e=>$('#prepDemo').addEventListener(e,()=>sim.apretar(false)));
+function iniciarJuegoCalibrado(){if(!disp.cal||paroWebUI||tutorialActivo||(modo!=='demo'&&!enlaceParo()))return;nuevaSesion();}
+$('#prepStop').onclick=()=>{if(modo==='demo'){cerrarPreparacion();pantalla('inicio');}else{$('#btnParoWeb').click();cerrarPreparacion();pantalla('inicio');}};
+
 })();
 </script>
 </body>
